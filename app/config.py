@@ -7,3 +7,4 @@ CLASS_NAMES = [
     "Normal",
     "ST/T Change"
 ]
+DEFAULT_THRESHOLD = 0.5
