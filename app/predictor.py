@@ -1,7 +1,7 @@
 import numpy as np
 import tensorflow as tf
-CLASS_NAMES = ["Conduction Disturbance","Hypertrophy","Myocardial Infarction","Normal","ST/T Change"]
-def predict_ecg(model, ecg_signal, threshold = 0.5):
+from app.config import CLASS_NAMES, DEFAULT_THRESHOLD
+def predict_ecg(model, ecg_signal, threshold = DEFAULT_THRESHOLD):
       # Add batch dimension, example: X[0]5
     ecg_signal = np.expand_dims(ecg_signal, axis=0)
 
