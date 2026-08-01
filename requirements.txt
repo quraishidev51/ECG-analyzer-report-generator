@@ -1,6 +1,8 @@
+tensorflow
 numpy
 pandas
-scipy
-matplotlib
 scikit-learn
-jupyter
+matplotlib
+wfdb
+fastapi
+uvicorn
