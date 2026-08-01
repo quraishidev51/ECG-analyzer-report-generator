@@ -1,4 +1,4 @@
-MODEL_PATH = "/content/drive/MyDrive/your_actual_path/best_model.keras"
+MODEL_PATH = '/content/drive/MyDrive/ECG_Project/best_model.keras'
 
 CLASS_NAMES = [
     "Conduction Disturbance",
