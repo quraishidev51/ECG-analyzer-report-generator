@@ -1,12 +1,11 @@
-# 🫀 ECG Analyzer & AI-Powered Clinical Report Generator
-
+# 🫀 ECG Analyzer & Explainable AI Clinical Report Generator
 An end-to-end deep learning pipeline for automated 12-lead ECG interpretation with explainable AI (XAI) and deployment-ready inference.
 
 ## Overview
 
 This project aims to develop an intelligent ECG analysis system capable of automatically detecting multiple cardiac abnormalities from 12-lead electrocardiograms. The system combines deep learning, explainable AI techniques, and a deployment-oriented software architecture to provide both accurate predictions and interpretable diagnostic reports.
 
-Unlike traditional research notebooks, this project is structured with future deployment in mind, separating model training, inference, report generation, and explainability into reusable components.
+In addition to predicting cardiac abnormalities, the system aims to provide interpretable predictions through Grad-CAM and SHAP visualizations, enabling users to understand which ECG regions contributed to each prediction.
 
 ---
 
@@ -91,6 +90,33 @@ Normal                       0.0%
 
 ---
 
+## System Architecture
+                 ECG Signal
+
+                      │
+
+                      ▼
+
+              TensorFlow Model
+
+                      │
+
+              Multi-label Prediction
+
+                      │
+
+          Automated Report Generator
+
+                      │
+
+                FastAPI Backend
+
+                      │
+
+              React Frontend (WIP)
+
+---
+
 ## Project Structure
 
 ```
@@ -108,7 +134,7 @@ ecg-analyzer/
 │
 ├── reports/
 │
-├── app/                 # Future API
+├── app/                 #FastAPI backend
 │
 └── README.md
 ```
@@ -131,13 +157,14 @@ ecg-analyzer/
 - Inference pipeline
 - Structured prediction output
 - Automated report generation
+- FastAPI backend
+- REST API Inference
 
 ### Work in Progress
 
 - Grad-CAM visualization
 - SHAP explanations
 - Class-specific threshold optimization
-- FastAPI backend
 - Frontend interface
 - Cloud deployment
 
@@ -157,16 +184,20 @@ ecg-analyzer/
 
 ---
 
+## Screenshots
+soon
+
+--- 
+
 ## Future Roadmap
 
 - [ ] Complete Grad-CAM implementation
 - [ ] Complete SHAP explanations
 - [ ] Optimize class-specific decision thresholds
-- [ ] Build REST API using FastAPI
-- [ ] Develop interactive web interface
 - [ ] Deploy the application
 - [ ] Generate downloadable clinical reports
 - [ ] Support multiple ECG input formats
+- [ ] Develop interactive web interface n visuals
 
 ---
 
