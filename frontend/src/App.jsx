@@ -54,7 +54,13 @@ function App() {
         json
       );
 
+      // 1. Set the AI report
       setReport(response.data.report);
+
+      // 2. Update chart data with the preprocessed signal from backend
+      if (response.data.processed_signal) {
+        setEcgData(response.data.processed_signal);
+      }
     } catch (err) {
       console.error(err);
       alert("Prediction failed.");

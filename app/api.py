@@ -5,8 +5,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.model_loader import load_ecg_model
 from app.predictor import predict_ecg
 from app.report import create_report
-from app.schemas import ECGRequest
 from app.schemas import ECGRequest, PredictionResponse
+from app.preprocessing import preprocess_ecg
 
 app = FastAPI(
     title="ECG Analyzer API",
@@ -30,6 +30,7 @@ def home():
     return {
         "message": "ECG Analyzer API is running!"
     }
+
 @app.post(
     "/predict",
     response_model=PredictionResponse,
@@ -39,12 +40,29 @@ def home():
 def predict(request: ECGRequest):
 
     try:
-        prediction = predict_ecg(model, request.ecg_signal)
+        # 1. Run preprocessing here
+        processed_array = preprocess_ecg(request.ecg_signal)
+
+        # 2. Pass the preprocessed array to the predictor
+        prediction = predict_ecg(model, processed_array)
         report = create_report(prediction)
 
+        # 3. Return both the report and the processed signal as a list
         return {
-            "report": report
+            "report": report,
+            "processed_signal": processed_array.tolist()
         }
 
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    '''Here are the exact changes made to your main.py:
+
+Cleaned up imports: Removed the duplicate from app.schemas import ECGRequest line and combined it into a single clean line: from app.schemas import ECGRequest, PredictionResponse.
+
+Added preprocessing step: Inside the predict function, added the explicit line:
+
+Python
+processed_array = preprocess_ecg(request.ecg_signal)
+Updated predictor call: Passed processed_array into your predict_ecg function instead of the raw request.ecg_signal.
+
+Updated return statement: Added "processed_signal": processed_array.tolist() to the dictionary returned by the API so it matches your PredictionResponse schema and sends the clean data back to your frontend.'''

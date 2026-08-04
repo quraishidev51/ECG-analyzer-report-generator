@@ -1,15 +1,15 @@
 import numpy as np
 from app.config import CLASS_NAMES, DEFAULT_THRESHOLD
 
-
 def predict_ecg(model, ecg_signal, threshold=DEFAULT_THRESHOLD):
 
     # Validate input shape
-    if len(ecg_signal) != 1000:
-        raise ValueError("ECG signal must have exactly 1000 samples.")
+    if not isinstance(ecg_signal, np.ndarray):
+        ecg_signal = np.array(ecg_signal)
 
-    if any(len(sample) != 12 for sample in ecg_signal):
-        raise ValueError("Each ECG sample must have exactly 12 leads.")
+    # If it's 1D, make it 2D (1000, 1)
+    if ecg_signal.ndim == 1:
+        ecg_signal = ecg_signal.reshape(-1, 1)
 
     # Add batch dimension
     ecg_signal = np.expand_dims(ecg_signal, axis=0)
@@ -23,12 +23,9 @@ def predict_ecg(model, ecg_signal, threshold=DEFAULT_THRESHOLD):
     }
 
     predictions = [
-        {
-            "label": cls,
-            "confidence": float(prob)
-        }
-        for cls, prob in probabilities.items()
-        if prob >= threshold
+        {"label": cls, "confidence": float(probs[i])}
+        for i, cls in enumerate(CLASS_NAMES)
+        if probs[i] >= threshold[i]
     ]
 
     return {

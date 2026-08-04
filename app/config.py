@@ -1,7 +1,7 @@
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-MODEL_PATH = BASE_DIR / "models" / "best_model.keras"
+MODEL_PATH = BASE_DIR / "models" / "revised_baseline_model.keras"
 CLASS_NAMES = [
     "Conduction Disturbance",
     "Hypertrophy",
@@ -9,7 +9,13 @@ CLASS_NAMES = [
     "Normal",
     "ST/T Change"
 ]
-DEFAULT_THRESHOLD = 0.5
+DEFAULT_THRESHOLD = [
+    0.34, # CD
+    0.27, # HYP
+    0.29, # MI
+    0.52, # NORM
+    0.29  # STTC
+]
 # ------------------------------------------------------------------
 # Build the model path relative to the project folder.
 #
