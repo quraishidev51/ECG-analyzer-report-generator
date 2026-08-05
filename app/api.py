@@ -1,7 +1,8 @@
+#gradcam check
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
-
+from app.gradcam import compute_gradcam
 from app.model_loader import load_ecg_model
 from app.predictor import predict_ecg
 from app.report import create_report
@@ -23,7 +24,7 @@ app.add_middleware(
 )
 
 #load the model
-model = load_ecg_model()
+model, grad_model = load_ecg_model()
 
 @app.get("/")
 def home():
@@ -45,12 +46,19 @@ def predict(request: ECGRequest):
 
         # 2. Pass the preprocessed array to the predictor
         prediction = predict_ecg(model, processed_array)
+        #gradcam heatmap and probabilities
+        heatmap, probabilities = compute_gradcam(
+            grad_model,
+            processed_array
+        )
         report = create_report(prediction)
 
         # 3. Return both the report and the processed signal as a list
         return {
             "report": report,
-            "processed_signal": processed_array.tolist()
+            "processed_signal": processed_array.tolist(),
+            "heatmap": heatmap.tolist(),
+            "probabilities": probabilities.tolist()
         }
 
     except ValueError as e:

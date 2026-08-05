@@ -1,7 +1,10 @@
+#gradcam check
 from pydantic import BaseModel
 from typing import List
+
+
 class ECGRequest(BaseModel):
-    ecg_signal : list[list[float]]
+    ecg_signal: List[List[float]]
 
 
 class Prediction(BaseModel):
@@ -11,4 +14,9 @@ class Prediction(BaseModel):
 
 class PredictionResponse(BaseModel):
     report: str
-    processed_signal: List[List[float]]#frontend will send the ecg signal and backend will return the processed signal along with the report
+
+    processed_signal: List[List[float]]
+
+    heatmap: List[float]
+
+    probabilities: List[float]
