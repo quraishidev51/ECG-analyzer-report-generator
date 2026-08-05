@@ -1,20 +1,14 @@
 import { useRef, useState } from "react";
 import axios from "axios";
-import {
-  LineChart,
-  Line,
-  ResponsiveContainer,
-  CartesianGrid,
-  XAxis,
-  YAxis
-} from "recharts";
 
 function App() {
   const fileInputRef = useRef(null);
 
   const [selectedFile, setSelectedFile] = useState(null);
   const [ecgData, setEcgData] = useState([]);
+  const [heatmap, setHeatmap] = useState([]);
   const [report, setReport] = useState("");
+  const [probabilities, setProbabilities] = useState({});
   const [loading, setLoading] = useState(false);
   const [showGradCAM, setShowGradCAM] = useState(false);
   const [selectedLead, setSelectedLead] = useState(1); // Default to lead index 1
@@ -54,12 +48,40 @@ function App() {
         json
       );
 
-      // 1. Set the AI report
+      // 1. Set the AI report and probabilities
       setReport(response.data.report);
+      if (response.data.probabilities) {
+        setProbabilities(response.data.probabilities);
+      }
 
       // 2. Update chart data with the preprocessed signal from backend
       if (response.data.processed_signal) {
         setEcgData(response.data.processed_signal);
+      }
+
+      // 3. Update and fully scale/normalize heatmap data between 0 and 1
+      if (response.data.heatmap) {
+        const rawHeatmap = response.data.heatmap;
+        
+        // Remove negatives (ReLU-style)
+        const positiveHeatmap = rawHeatmap.map((v) => Math.max(0, v));
+
+        // Find the peak activation value
+        const maxHeat = Math.max(...positiveHeatmap);
+
+        // Scale everything between 0 and 1 safely (avoiding divide-by-zero if flat)
+        const normalizedHeatmap = positiveHeatmap.map(
+          (v) => (maxHeat > 0 ? v / maxHeat : 0)
+        );
+
+        setHeatmap(normalizedHeatmap);
+
+        console.log("max heat (raw):", Math.max(...rawHeatmap));
+        console.log(
+          "heat range:",
+          Math.min(...normalizedHeatmap),
+          Math.max(...normalizedHeatmap)
+        );
       }
     } catch (err) {
       console.error(err);
@@ -68,6 +90,7 @@ function App() {
       setLoading(false);
     }
   };
+
   const DISPLAY_SAMPLES = 600;
 
   const chartData =
@@ -77,23 +100,104 @@ function App() {
           .map((sample, index) => ({
             x: index,
             value: sample[selectedLead] ?? sample[0],
+            heat: heatmap[index] ?? 0, // Use fully normalized [0, 1] heatmap value
           }))
-    : [];
+      : [];
+
+  // Smoother Rainbow Color Mapping: Blue -> Cyan -> Yellow -> Orange -> Red with transparency
+  const getRainbowColorAndOpacity = (heat) => {
+    const h = Math.max(0, Math.min(1, heat));
+    const opacity = 0.2 + h * 0.8;
+
+    let hue = 240; // Default Blue
+    if (h < 0.25) {
+      hue = 240 - (h / 0.25) * 60;
+    } else if (h < 0.5) {
+      hue = 180 - ((h - 0.25) / 0.25) * 120;
+    } else if (h < 0.75) {
+      hue = 60 - ((h - 0.5) / 0.25) * 30;
+    } else {
+      hue = 30 - ((h - 0.75) / 0.25) * 30;
+    }
+
+    return {
+      color: `hsl(${hue}, 100%, 50%)`,
+      opacity: opacity,
+    };
+  };
+
+  // SVG scaling calculations for custom renderer
+  const svgWidth = 1200;
+  const svgHeight = 600;
+  const paddingX = 40;
+  const paddingY = 60;
+
+  const values = chartData.map((d) => d.value);
+  const minY = values.length > 0 ? Math.min(...values) : -1;
+  const maxY = values.length > 0 ? Math.max(...values) : 1;
+  const yRange = maxY - minY === 0 ? 1 : maxY - minY;
+
+  const getCoordinates = (index, value) => {
+    const x = paddingX + (index / (DISPLAY_SAMPLES - 1 || 1)) * (svgWidth - paddingX * 2);
+    const y = svgHeight - paddingY - ((value - minY) / yRange) * (svgHeight - paddingY * 2);
+    return { x, y };
+  };
+
+  // Helper to extract top prediction info for dynamic summary
+  const getTopPrediction = () => {
+    const entries = Object.entries(probabilities);
+    if (entries.length === 0) return null;
+    entries.sort((a, b) => b[1] - a[1]);
+    return { label: entries[0][0], val: (entries[0][1] * 100).toFixed(1) };
+  };
+
+  const topPred = getTopPrediction();
+
+  // Derive real Grad-CAM-based reasoning: find where the heatmap peaks and
+  // map that sample index to the ECG segment it most likely corresponds to.
+  // NOTE: these index thresholds assume a ~600-sample display window laid
+  // out P-wave -> QRS complex -> T-wave. If the backend's sampling rate or
+  // lead length changes, tune these boundaries (or better, pass segment
+  // boundaries from the backend instead of hardcoding them here).
+  const getGradCAMReasoning = () => {
+    if (!heatmap || heatmap.length === 0) return null;
+
+    let peakIndex = 0;
+    let peakVal = -Infinity;
+    for (let i = 0; i < Math.min(heatmap.length, DISPLAY_SAMPLES); i++) {
+      if (heatmap[i] > peakVal) {
+        peakVal = heatmap[i];
+        peakIndex = i;
+      }
+    }
+
+    let region;
+    if (peakIndex < 200) {
+      region = "P-wave";
+    } else if (peakIndex < 480) {
+      region = "QRS complex";
+    } else {
+      region = "T-wave";
+    }
+
+    return { peakIndex, region };
+  };
+
+  const gradCamReasoning = getGradCAMReasoning();
 
   return (
     <div className="min-h-screen bg-slate-950 text-white font-sans">
 
       {/* HEADER */}
-
       <header className="border-b border-slate-800 bg-slate-900 px-10 py-6 flex justify-between items-center shadow-md">
 
         <div>
           <h1 className="text-4xl font-bold tracking-wide">
-            🫀 ECG Analyzer
+            🫀 CardioXAI
           </h1>
 
           <p className="text-slate-400 mt-2 text-sm tracking-wide">
-            Professional Grade Clinical Diagnostic Dashboard
+              ECG Analysis & AI Report Generator 
           </p>
         </div>
 
@@ -149,13 +253,11 @@ function App() {
 
       </header>
 
-      {/* BODY */}
+      {/* BODY - Expanded layout: ECG takes 8 columns, Report takes 4 columns */}
+      <main className="grid grid-cols-12 gap-6 p-8">
 
-      <main className="grid grid-cols-3 gap-6 p-8">
-
-        {/* ECG */}
-
-        <section className="col-span-2 bg-slate-900 rounded-2xl border border-slate-800 p-6 shadow-xl">
+        {/* ECG SECTION (col-span-8 for an expansive widescreen presentation) */}
+        <section className="col-span-12 lg:col-span-8 bg-slate-900 rounded-2xl border border-slate-800 p-6 shadow-xl flex flex-col justify-between">
 
           <div className="flex justify-between items-center mb-5">
 
@@ -172,53 +274,59 @@ function App() {
             </div>
 
             <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer select-none">
-
               <input
                 type="checkbox"
                 checked={showGradCAM}
                 onChange={() => setShowGradCAM(!showGradCAM)}
                 className="rounded accent-red-500 cursor-pointer w-4 h-4"
               />
-
-              Show Grad-CAM Heatmap
-
+              Model's Eyes 👁️👁️
             </label>
 
           </div>
 
-          <div className="relative h-[560px] rounded-xl border border-slate-700 bg-[#0d1117] overflow-hidden shadow-inner flex flex-col justify-between">
+          <div className="relative h-[520px] rounded-xl border border-slate-700 bg-[#0d1117] overflow-hidden shadow-inner flex flex-col justify-between">
 
-            {/* Medical Grid Simulation (Major & Minor Grid Lines) */}
+            {/* Medical Grid Simulation */}
             <div className="absolute inset-0 pointer-events-none bg-[linear-gradient(to_right,#ff4d4d15_1px,transparent_1px),linear-gradient(to_bottom,#ff4d4d15_1px,transparent_1px)] bg-[size:20px_20px]" />
             <div className="absolute inset-0 pointer-events-none bg-[linear-gradient(to_right,#ff4d4d25_1px,transparent_1px),linear-gradient(to_bottom,#ff4d4d25_1px,transparent_1px)] bg-[size:100px_100px]" />
 
-            <div className="absolute inset-0 pt-4">
+            <div className="absolute inset-0 pt-4 flex items-center justify-center">
               {chartData.length > 0 ? (
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={chartData} margin={{ top: 10, right: 10, left: 10, bottom: 20 }}>
-                    <CartesianGrid stroke="transparent" />
-                    <XAxis hide dataKey="x" />
-                    <YAxis hide domain={['auto', 'auto']} />
-                    <defs>
-                      <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
-                        <feGaussianBlur stdDeviation="1.5" result="coloredBlur"/>
-                        <feMerge>
-                          <feMergeNode in="coloredBlur"/>
-                          <feMergeNode in="SourceGraphic"/>
-                        </feMerge>
-                      </filter>
-                    </defs>
-                    <Line
-                      type="linear"
-                      dataKey="value"
-                      stroke="#f87171"
-                      strokeWidth={1.75}
-                      dot={false}
-                      isAnimationActive={false}
-                      filter="url(#glow)"
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
+                <svg viewBox={`0 0 ${svgWidth} ${svgHeight}`} className="w-full h-full p-4">
+                  <defs>
+                    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+                      <feGaussianBlur stdDeviation="1.5" result="coloredBlur"/>
+                      <feMerge>
+                        <feMergeNode in="coloredBlur"/>
+                        <feMergeNode in="SourceGraphic"/>
+                      </feMerge>
+                    </filter>
+                  </defs>
+
+                  {chartData.slice(0, chartData.length - 1).map((entry, index) => {
+                    const nextEntry = chartData[index + 1];
+                    const start = getCoordinates(entry.x, entry.value);
+                    const end = getCoordinates(nextEntry.x, nextEntry.value);
+                    const segmentHeat = showGradCAM ? entry.heat : 0;
+                    const styling = showGradCAM ? getRainbowColorAndOpacity(segmentHeat) : { color: "#ffffff", opacity: 1 };
+
+                    return (
+                      <line
+                        key={`svg-segment-${index}`}
+                        x1={start.x}
+                        y1={start.y}
+                        x2={end.x}
+                        y2={end.y}
+                        stroke={styling.color}
+                        strokeOpacity={styling.opacity}
+                        strokeWidth="2.2"
+                        strokeLinecap="round"
+                        filter="url(#glow)"
+                      />
+                    );
+                  })}
+                </svg>
               ) : selectedFile ? (
                 <div className="absolute inset-0 flex flex-col items-center justify-center">
                   <p className="text-lg font-medium text-slate-300">
@@ -243,23 +351,46 @@ function App() {
               </div>
             </div>
 
-            {showGradCAM && (
-              <div className="absolute inset-0 pointer-events-none bg-gradient-to-r from-red-600/30 via-yellow-500/20 to-transparent mix-blend-screen transition-all duration-300" />
-            )}
-
           </div>
+
+          {/* Legend */}
+{showGradCAM && (
+  <div className="mt-4 bg-slate-950/70 border border-slate-800 px-4 py-3 rounded-xl flex flex-col gap-2">
+    <div className="flex justify-between items-center text-xs text-slate-400 font-mono">
+      <span>Low Importance</span>
+      <span className="font-semibold text-slate-200">Grad-CAM Attribution Scale</span>
+      <span>High Importance</span>
+    </div>
+
+    {/* Gradient bar matching the exact hue math from getRainbowColorAndOpacity */}
+    <div
+      className="h-3 w-full rounded-full shadow-inner"
+      style={{
+        background:
+          "linear-gradient(to right, hsl(240,100%,50%) 0%, hsl(180,100%,50%) 25%, hsl(120,100%,50%) 37.5%, hsl(60,100%,50%) 50%, hsl(30,100%,50%) 75%, hsl(0,100%,50%) 100%)",
+      }}
+    />
+
+    {/* Labels positioned at the actual stop locations, not evenly spaced */}
+    <div className="relative h-4 text-[11px] font-mono text-slate-400">
+      <span className="absolute" style={{ left: "0%" }}>Blue</span>
+      <span className="absolute -translate-x-1/2" style={{ left: "25%" }}></span>
+      <span className="absolute -translate-x-1/2" style={{ left: "37.5%" }}></span>
+      <span className="absolute -translate-x-1/2" style={{ left: "50%" }}>yellow</span>
+      <span className="absolute -translate-x-1/2" style={{ left: "75%" }}></span>
+      <span className="absolute -translate-x-full" style={{ left: "100%" }}>Red</span>
+    </div>
+  </div>
+)}
 
         </section>
 
-        {/* RIGHT COLUMN */}
+        {/* RIGHT COLUMN (col-span-4 for the AI report and metrics panel) */}
+        <div className="col-span-12 lg:col-span-4 space-y-6">
 
-        <div className="space-y-6">
-
-          {/* REPORT */}
-
-          <section className="bg-slate-900 rounded-2xl border border-slate-800 p-6 shadow-xl">
-
-            <h2 className="text-2xl font-semibold mb-5">
+          {/* REPORT & PROBABILITIES */}
+          <section className="bg-slate-900 rounded-2xl border border-slate-800 p-6 shadow-xl space-y-5">
+            <h2 className="text-2xl font-semibold">
               AI Report
             </h2>
 
@@ -269,9 +400,11 @@ function App() {
                 Running ECG Analysis...
               </div>
             ) : report ? (
-              <pre className="whitespace-pre-wrap text-slate-300 leading-7 font-mono text-sm bg-slate-950 p-4 rounded-xl border border-slate-800">
-                {report}
-              </pre>
+              <div className="space-y-4">
+                <pre className="whitespace-pre-wrap text-slate-300 leading-6 font-mono text-xs bg-slate-950 p-4 rounded-xl border border-slate-800">
+                  {report}
+                </pre>
+              </div>
             ) : (
               <div className="text-slate-400 leading-7">
                 Upload a JSON ECG and press
@@ -283,34 +416,33 @@ function App() {
                 The generated report will appear here.
               </div>
             )}
-
           </section>
 
-          {/* XAI */}
-
-          <section className="bg-slate-900 rounded-2xl border border-slate-800 p-6 shadow-xl">
-
-            <h2 className="text-2xl font-semibold mb-5">
-              Reasoning & Explainability
+          {/* XAI & EXPLANATION */}
+          <section className="bg-slate-900 rounded-2xl border border-slate-800 p-6 shadow-xl space-y-4">
+            <h2 className="text-2xl font-semibold">
+              Model's Reasoning 
             </h2>
 
-            <div className="text-slate-400 leading-7 text-sm">
-              <p>
-                Grad-CAM visualization will be integrated after
-                the ECG waveform renderer is completed.
-              </p>
-              <br />
-              <p>
-                Future versions will also include:
-              </p>
-              <ul className="list-disc ml-6 mt-3 space-y-2 text-slate-300">
-                <li>Grad-CAM explanation</li>
-                <li>Attention visualization</li>
-                <li>LLM-generated reasoning</li>
-                <li>Clinical interpretation</li>
-              </ul>
+            <div className="text-slate-300 leading-6 text-sm bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-3">
+              {gradCamReasoning ? (
+                <>
+                  <p className="font-medium text-blue-400">
+                    The model primarily focused on the {gradCamReasoning.region} to make predictions.
+                  </p>
+                  <p className="text-slate-400 text-xs leading-relaxed">
+                    Peak Grad-CAM activation occurred at sample {gradCamReasoning.peakIndex} of the displayed waveform.
+                  </p>
+                </>
+              ) : (
+                <p className="font-medium text-slate-400">
+                  Run an analysis to generate Grad-CAM-based reasoning.
+                </p>
+              )}
+
             </div>
 
+            
           </section>
 
         </div>
