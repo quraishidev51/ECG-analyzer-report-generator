@@ -153,14 +153,63 @@ function App() {
 
   const topPred = getTopPrediction();
 
+  // Detect R-peaks in the currently displayed signal (simple local-maxima +
+  // prominence approach, similar to scipy.signal.find_peaks with
+  // prominence=np.std(signal)), so region labeling is anchored to the
+  // ACTUAL beats in this specific waveform instead of a fixed index range.
+  const detectRPeaks = (data, minDistance = 40) => {
+    const values = data.map((d) => d.value);
+    const mean = values.reduce((a, b) => a + b, 0) / values.length;
+    const std = Math.sqrt(
+      values.reduce((sum, v) => sum + (v - mean) ** 2, 0) / values.length
+    );
+    const prominenceThreshold = std;
+
+    const peaks = [];
+    for (let i = 1; i < values.length - 1; i++) {
+      const isLocalMax = values[i] > values[i - 1] && values[i] >= values[i + 1];
+      const isProminent = values[i] - mean > prominenceThreshold;
+      if (isLocalMax && isProminent) {
+        // Enforce a minimum distance from the last detected peak so we
+        // don't pick up multiple bumps within the same QRS complex.
+        if (peaks.length === 0 || i - peaks[peaks.length - 1] >= minDistance) {
+          peaks.push(i);
+        }
+      }
+    }
+    return peaks;
+  };
+
+  // Classify a sample index relative to the NEAREST real R-peak, instead of
+  // a fixed absolute cutoff. This stays accurate regardless of where in the
+  // multi-beat display window the Grad-CAM peak happens to fall.
+  const classifyRegion = (index, rPeaks) => {
+    if (rPeaks.length === 0) return "Unclear (no beat detected)";
+
+    let nearestPeak = rPeaks[0];
+    let minDist = Math.abs(index - rPeaks[0]);
+    for (const r of rPeaks) {
+      const dist = Math.abs(index - r);
+      if (dist < minDist) {
+        minDist = dist;
+        nearestPeak = r;
+      }
+    }
+
+    const offset = index - nearestPeak; // negative = before the beat, positive = after
+
+    if (offset >= -35 && offset <= -12) return "P-wave";
+    if (offset >= -11 && offset <= 11) return "QRS complex";
+    if (offset >= 12 && offset <= 45) return "ST segment";
+    if (offset >= 46 && offset <= 90) return "T-wave";
+    return "Baseline / between beats";
+  };
+
   // Derive real Grad-CAM-based reasoning: find where the heatmap peaks and
-  // map that sample index to the ECG segment it most likely corresponds to.
-  // NOTE: these index thresholds assume a ~600-sample display window laid
-  // out P-wave -> QRS complex -> T-wave. If the backend's sampling rate or
-  // lead length changes, tune these boundaries (or better, pass segment
-  // boundaries from the backend instead of hardcoding them here).
+  // map that sample index to the ECG segment it most likely corresponds to,
+  // anchored to the nearest actually-detected R-peak in this waveform.
   const getGradCAMReasoning = () => {
-    if (!heatmap || heatmap.length === 0) return null;
+    if (!heatmap || heatmap.length === 0 || chartData.length === 0) return null;
 
     let peakIndex = 0;
     let peakVal = -Infinity;
@@ -171,16 +220,10 @@ function App() {
       }
     }
 
-    let region;
-    if (peakIndex < 200) {
-      region = "P-wave";
-    } else if (peakIndex < 480) {
-      region = "QRS complex";
-    } else {
-      region = "T-wave";
-    }
+    const rPeaks = detectRPeaks(chartData);
+    const region = classifyRegion(peakIndex, rPeaks);
 
-    return { peakIndex, region };
+    return { peakIndex, region, rPeaks };
   };
 
   const gradCamReasoning = getGradCAMReasoning();
@@ -454,3 +497,4 @@ function App() {
 }
 
 export default App;
+
